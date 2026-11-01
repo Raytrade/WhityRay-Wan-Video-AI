@@ -5,7 +5,7 @@ export const maxDuration = 60;
 type Input = { prompt?: string; negativePrompt?: string; aspectRatio?: string; duration?: number; seed?: number };
 const jsonError = (message: string, status = 400) => NextResponse.json({ error: message }, { status });
 
-async function replicate(input: Input) {
+async function replicate(input: Input): Promise<NextResponse> {
   const token = process.env.REPLICATE_API_TOKEN!;
   const model = process.env.REPLICATE_MODEL!;
   const version = process.env.REPLICATE_VERSION;
@@ -15,7 +15,7 @@ async function replicate(input: Input) {
   const prediction = await create.json();
   if (!create.ok) throw new Error(prediction.detail || prediction.error || "Replicate could not start the video job.");
   let job = prediction;
-  for (let i = 0; i < 50 && !["succeeded","failed","canceled"].includes(job.status); i++) {
+  for (let i = 0; i < 12 && !["succeeded","failed","canceled"].includes(job.status); i++) {
     if (!job.urls?.get) break;
     await new Promise(r => setTimeout(r, 2500));
     const poll = await fetch(job.urls.get, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
@@ -23,12 +23,12 @@ async function replicate(input: Input) {
     if (!poll.ok) throw new Error("Could not check video generation status.");
   }
   if (job.status === "failed" || job.status === "canceled") throw new Error(job.error || "Video generation failed.");
-  if (job.status !== "succeeded") return { status: "processing", id: job.id, pollUrl: job.urls?.get };
+  if (job.status !== "succeeded") return NextResponse.json({ status: "processing", id: job.id, pollUrl: job.urls?.get });
   const output = Array.isArray(job.output) ? job.output[0] : job.output;
-  return { status: "succeeded", id: job.id, videoUrl: typeof output === "string" ? output : output?.url || output };
+  return NextResponse.json({ status: "succeeded", id: job.id, videoUrl: typeof output === "string" ? output : output?.url || output });
 }
 
-async function huggingFace(input: Input) {
+async function huggingFace(input: Input): Promise<NextResponse> {
   const endpoint = process.env.HF_ENDPOINT_URL!;
   const response = await fetch(endpoint, { method: "POST", headers: { Authorization: `Bearer ${process.env.HF_TOKEN}`, "Content-Type": "application/json", Accept: "video/mp4, application/json" }, body: JSON.stringify({ inputs: input.prompt, parameters: { negative_prompt: input.negativePrompt, num_frames: Math.min(120, Math.max(16, (Number(input.duration) || 5) * 16)), guidance_scale: 7.5 } }), cache: "no-store", signal: AbortSignal.timeout(55000) });
   if (!response.ok) {
@@ -39,10 +39,10 @@ async function huggingFace(input: Input) {
   if (type.includes("json")) {
     const data = await response.json();
     const url = data.video_url || data.url || data.output?.[0] || data.output;
-    if (typeof url === "string" && url.startsWith("http")) return { status: "succeeded", videoUrl: url };
+    if (typeof url === "string" && url.startsWith("http")) return NextResponse.json({ status: "succeeded", videoUrl: url });
     throw new Error(data.error || "Endpoint returned JSON but no video URL. Configure an endpoint that returns MP4 or a video URL.");
   }
-  return new Response(response.body, { headers: { "Content-Type": type || "video/mp4", "Cache-Control": "no-store", "Content-Disposition": 'inline; filename="whityray-scene.mp4"' } });
+  return new NextResponse(response.body, { headers: { "Content-Type": type || "video/mp4", "Cache-Control": "no-store", "Content-Disposition": 'inline; filename="whityray-scene.mp4"' } });
 }
 
 export async function POST(req: NextRequest) {
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     const prompt = String(body.prompt || "").trim();
     if (prompt.length < 12) return jsonError("Write a more descriptive scene prompt (at least 12 characters).");
     if (prompt.length > 4000) return jsonError("Scene prompt is too long (maximum 4,000 characters).");
-    if (process.env.REPLICATE_API_TOKEN && process.env.REPLICATE_MODEL) return NextResponse.json(await replicate({ ...body, prompt }));
+    if (process.env.REPLICATE_API_TOKEN && process.env.REPLICATE_MODEL) return await replicate({ ...body, prompt });
     if (process.env.HF_TOKEN && process.env.HF_ENDPOINT_URL) return await huggingFace({ ...body, prompt });
     return jsonError("No video provider is configured. Add REPLICATE_API_TOKEN + REPLICATE_MODEL, or HF_TOKEN + HF_ENDPOINT_URL, in Vercel Environment Variables.", 503);
   } catch (error) {
