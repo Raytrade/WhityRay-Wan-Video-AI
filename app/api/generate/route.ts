@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 type Input = { prompt?: string; negativePrompt?: string; aspectRatio?: string; duration?: number; seed?: number };
 const jsonError = (message: string, status = 400) => NextResponse.json({ error: message }, { status });
@@ -30,7 +30,7 @@ async function replicate(input: Input) {
 
 async function huggingFace(input: Input) {
   const endpoint = process.env.HF_ENDPOINT_URL!;
-  const response = await fetch(endpoint, { method: "POST", headers: { Authorization: `Bearer ${process.env.HF_TOKEN}`, "Content-Type": "application/json", Accept: "video/mp4, application/json" }, body: JSON.stringify({ inputs: input.prompt, parameters: { negative_prompt: input.negativePrompt, num_frames: Math.min(120, Math.max(16, (Number(input.duration) || 5) * 16)), guidance_scale: 7.5 } }), cache: "no-store", signal: AbortSignal.timeout(240000) });
+  const response = await fetch(endpoint, { method: "POST", headers: { Authorization: `Bearer ${process.env.HF_TOKEN}`, "Content-Type": "application/json", Accept: "video/mp4, application/json" }, body: JSON.stringify({ inputs: input.prompt, parameters: { negative_prompt: input.negativePrompt, num_frames: Math.min(120, Math.max(16, (Number(input.duration) || 5) * 16)), guidance_scale: 7.5 } }), cache: "no-store", signal: AbortSignal.timeout(55000) });
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`Hugging Face endpoint ${response.status}: ${detail.slice(0, 500)}`);
